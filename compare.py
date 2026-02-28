@@ -2,29 +2,15 @@ import io
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Excel Column Comparator", layout="wide")
-st.title("So sánh dữ liệu theo cột giữa 2 file Excel")
+st.set_page_config(page_title="Appo vs Xendit Reconciliation", layout="wide")
+st.title("Appo vs Xendit Reconciliation Tool")
 
 # ---------------- Helpers ----------------
 
 
-def make_unique_columns(cols):
-    seen = {}
-    out = []
-    for c in cols:
-        c = str(c).strip()
-        if c not in seen:
-            seen[c] = 0
-            out.append(c)
-        else:
-            seen[c] += 1
-            out.append(f"{c}__dup{seen[c]}")
-    return out
-
-
-def read_excel(uploaded_file):
-    df = pd.read_excel(uploaded_file, dtype=str).fillna("")
-    df.columns = make_unique_columns(df.columns)
+def read_excel(uploaded_file, sheet_name=None):
+    df = pd.read_excel(uploaded_file, dtype=str, sheet_name=sheet_name)
+    df = df.fillna("")
     return df
 
 
@@ -34,88 +20,211 @@ def normalize_series(s: pd.Series) -> pd.Series:
     return s
 
 
-def to_df(values, colname="value"):
-    return pd.DataFrame({colname: values})
+def get_sheet_names(xlsx_file):
+    try:
+        xl = pd.ExcelFile(xlsx_file)
+        return xl.sheet_names
+    except Exception:
+        return ["Sheet1"]
+
+# ============================================================
+# TABS
+# ============================================================
 
 
-# ---------------- UI ----------------
-c1, c2 = st.columns(2)
-with c1:
-    f1 = st.file_uploader("Upload File A (.xlsx)", type=["xlsx"])
-with c2:
-    f2 = st.file_uploader("Upload File B (.xlsx)", type=["xlsx"])
+tab1, tab2 = st.tabs([
+    "📊 APPO X XENDIT ",
+    "🔎 DIGISTORE X APPO "
+])
 
-if not f1 or not f2:
-    st.stop()
+# ============================================================
+# TAB 1 - SO SÁNH CHUẨN
+# ============================================================
 
-df_a = read_excel(f1)
-df_b = read_excel(f2)
+with tab1:
 
-st.subheader("Chọn cột để so sánh")
-col1, col2 = st.columns(2)
-with col1:
-    col_a = st.selectbox("Cột ở File A", df_a.columns)
-with col2:
-    col_b = st.selectbox("Cột ở File B", df_b.columns)
+    st.subheader("So sánh File A (Appo) và File B (Xendit)")
 
-# ---------------- Compare ----------------
-if st.button("Compare", type="primary"):
-    a = normalize_series(df_a[col_a])
-    b = normalize_series(df_b[col_b])
+    c1, c2 = st.columns(2)
+    with c1:
+        f1 = st.file_uploader("FILE APPO (.xlsx)",
+                              type=["xlsx"], key="t1_f1")
+    with c2:
+        f2 = st.file_uploader(
+            "FILE XENDIT (.xlsx)", type=["xlsx"], key="t1_f2")
 
-    # Ignore empty values
-    a_set = set(a[a != ""])
-    b_set = set(b[b != ""])
+    if f1 and f2:
 
-    only_in_a = sorted(a_set - b_set)   # A có mà B không có
-    only_in_b = sorted(b_set - a_set)   # B có mà A không có
-    common = sorted(a_set & b_set)
+        s1, s2 = st.columns(2)
+        with s1:
+            sheet_a = st.selectbox(
+                "Sheet File A", get_sheet_names(f1), key="t1_s1")
+        with s2:
+            sheet_b = st.selectbox(
+                "Sheet File B", get_sheet_names(f2), key="t1_s2")
 
-    if not only_in_a and not only_in_b:
-        st.success(
-            "✅ Dữ liệu trùng khớp giữa 2 file (không có thông tin bị lệch).")
-        st.subheader("Dữ liệu trùng khớp")
-        st.dataframe(to_df(common, "value"), use_container_width=True)
+        df_a = read_excel(f1, sheet_name=sheet_a)
+        df_b = read_excel(f2, sheet_name=sheet_b)
 
-    else:
-        st.error("❌ Dữ liệu KHÔNG trùng khớp giữa 2 file.")
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        df_b.columns = [str(c).strip() for c in df_b.columns]
 
-        # ✅ Theo đúng ý bạn: luôn báo “B có mà A không có”
-        st.subheader("➕ Dữ liệu có ở File B mà File A KHÔNG có")
-        if only_in_b:
-            st.dataframe(to_df(only_in_b, "value_only_in_B"),
-                         use_container_width=True)
-        else:
-            st.info("Không có dữ liệu nào chỉ xuất hiện ở File B.")
+        if st.button("Compare", type="primary", key="t1_compare"):
 
-        st.subheader("➖ Dữ liệu có ở File A mà File B KHÔNG có")
-        if only_in_a:
-            st.dataframe(to_df(only_in_a, "value_only_in_A"),
-                         use_container_width=True)
-        else:
-            st.info("Không có dữ liệu nào chỉ xuất hiện ở File A.")
+            common_cols = list(set(df_a.columns) & set(df_b.columns))
+            common_cols = [
+                c for c in common_cols if c.strip().lower() != "stt"]
 
-        # (Tuỳ chọn) vẫn show common để đối chiếu
-        st.subheader("✅ Dữ liệu trùng khớp (để đối chiếu)")
-        if common:
-            st.dataframe(to_df(common, "value_common"),
-                         use_container_width=True)
-        else:
-            st.info("Không có giá trị trùng khớp.")
+            if not common_cols:
+                st.error("❌ Không có cột chung giữa 2 file.")
+                st.stop()
 
-    # ---------- Export Excel ----------
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as w:
-        to_df(common, "common").to_excel(w, index=False, sheet_name="Common")
-        to_df(only_in_a, "only_in_A").to_excel(
-            w, index=False, sheet_name="Only_in_A")
-        to_df(only_in_b, "only_in_B").to_excel(
-            w, index=False, sheet_name="Only_in_B")
-    output.seek(0)
+            for col in common_cols:
+                df_a[col] = normalize_series(df_a[col])
+                df_b[col] = normalize_series(df_b[col])
 
-    st.download_button(
-        "Download report Excel",
-        data=output,
-        file_name="compare_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+            total_a = len(df_a)
+            total_b = len(df_b)
+
+            merged = df_b.merge(
+                df_a,
+                on=common_cols,
+                how="left",
+                indicator=True
+            )
+
+            b_not_in_a = merged[merged["_merge"] == "left_only"]
+            b_in_a_count = total_b - len(b_not_in_a)
+            appo_after_minus = total_a - b_in_a_count
+
+            # ===== UI =====
+
+            st.markdown("## 📊 KẾT QUẢ")
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Tổng giao dịch Appo", total_a)
+            col2.metric("Tổng giao dịch Xendit", total_b)
+            col3.metric("Appo sau khi trừ Xendit", appo_after_minus)
+
+            st.markdown("---")
+
+            if len(b_not_in_a) == 0:
+                st.success("✅ Toàn bộ dữ liệu Xendit tồn tại trong Appo.")
+            else:
+                st.error("❌ Có dữ liệu Xendit KHÔNG tồn tại trong Appo.")
+                st.dataframe(b_not_in_a[common_cols], use_container_width=True)
+
+            # ===== Export Excel =====
+
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_a.to_excel(writer, index=False, sheet_name="Appo")
+                df_b.to_excel(writer, index=False, sheet_name="Xendit")
+                b_not_in_a[common_cols].to_excel(
+                    writer,
+                    index=False,
+                    sheet_name="Xendit_Not_In_Appo"
+                )
+
+            output.seek(0)
+
+            st.download_button(
+                "Download Report Excel",
+                data=output,
+                file_name="appo_vs_xendit_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+# ============================================================
+# TAB 2 - SO SÁNH LINH HOẠT
+# ============================================================
+
+with tab2:
+
+    st.subheader("So sánh linh hoạt - Tự động lấy cột giống nhau")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        f1 = st.file_uploader("Upload File A (.xlsx)",
+                              type=["xlsx"], key="t2_f1")
+    with c2:
+        f2 = st.file_uploader("Upload File B (.xlsx)",
+                              type=["xlsx"], key="t2_f2")
+
+    if f1 and f2:
+
+        sheet_a = st.selectbox(
+            "Sheet File A", get_sheet_names(f1), key="t2_s1")
+        sheet_b = st.selectbox(
+            "Sheet File B", get_sheet_names(f2), key="t2_s2")
+
+        df_a = read_excel(f1, sheet_name=sheet_a)
+        df_b = read_excel(f2, sheet_name=sheet_b)
+
+        # Chuẩn hóa tên cột
+        df_a.columns = [str(c).strip() for c in df_a.columns]
+        df_b.columns = [str(c).strip() for c in df_b.columns]
+
+        if st.button("Compare Linh Hoạt", type="primary", key="t2_compare"):
+
+            # Lấy các cột giống nhau (bỏ STT)
+            common_cols = list(set(df_a.columns) & set(df_b.columns))
+            common_cols = [
+                c for c in common_cols if c.strip().lower() != "stt"
+            ]
+
+            if not common_cols:
+                st.error("❌ Không có cột chung để so sánh.")
+                st.stop()
+
+            st.info(f"Các cột được dùng để so sánh: {common_cols}")
+
+            # Tạo bản copy chỉ chứa các cột dùng để so sánh
+            df_a_compare = df_a[common_cols].copy()
+            df_b_compare = df_b[common_cols].copy()
+
+            # Normalize dữ liệu
+            for col in common_cols:
+                df_a_compare[col] = normalize_series(df_a_compare[col])
+                df_b_compare[col] = normalize_series(df_b_compare[col])
+
+            # Merge để tìm khác biệt
+            merged = df_b_compare.merge(
+                df_a_compare,
+                on=common_cols,
+                how="outer",
+                indicator=True
+            )
+
+            b_not_in_a = merged[merged["_merge"] == "left_only"]
+            a_not_in_b = merged[merged["_merge"] == "right_only"]
+
+            # ================= UI KẾT QUẢ =================
+
+            st.markdown("## 📊 KẾT QUẢ")
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Tổng dòng File A", len(df_a_compare))
+            col2.metric("Tổng dòng File B", len(df_b_compare))
+            col3.metric("B không tồn tại trong A", len(b_not_in_a))
+
+            if len(b_not_in_a) > 0:
+                st.error("❌ Có dữ liệu File B không tồn tại trong File A.")
+                st.dataframe(b_not_in_a[common_cols], use_container_width=True)
+            else:
+                st.success("✅ Tất cả dữ liệu File B tồn tại trong File A.")
+
+            # ================= SHOW DATA ĐỂ CHECK =================
+
+            st.markdown("---")
+            st.subheader("📄 Data File A (cột dùng để so sánh)")
+            st.dataframe(df_a_compare, use_container_width=True)
+
+            st.subheader("📄 Data File B (cột dùng để so sánh)")
+            st.dataframe(df_b_compare, use_container_width=True)
+
+            st.subheader("❗ Dữ liệu chỉ có trong File A")
+            st.dataframe(a_not_in_b[common_cols], use_container_width=True)
+
+            st.subheader("❗ Dữ liệu chỉ có trong File B")
+            st.dataframe(b_not_in_a[common_cols], use_container_width=True)
