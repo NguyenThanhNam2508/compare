@@ -158,7 +158,7 @@ with tab1:
             )
 
 # ============================================================
-# TAB 2 - DIGISTORE X APPO
+# TAB 2 - SO SÁNH LINH HOẠT + SHOW CỘT SONG SONG
 # ============================================================
 
 with tab2:
@@ -188,12 +188,15 @@ with tab2:
 
         if st.button("Compare Linh Hoạt", type="primary", key="t2_compare"):
 
+            # Lấy cột chung (bỏ STT)
             common_cols = list(set(df_a.columns) & set(df_b.columns))
             common_cols = [c for c in common_cols if c.lower() != "stt"]
 
             if not common_cols:
                 st.error("❌ Không có cột chung để so sánh.")
                 st.stop()
+
+            st.info(f"Các cột được dùng để so sánh: {common_cols}")
 
             df_a_compare = df_a[common_cols].copy()
             df_b_compare = df_b[common_cols].copy()
@@ -212,23 +215,70 @@ with tab2:
             b_not_in_a = merged[merged["_merge"] == "left_only"]
             a_not_in_b = merged[merged["_merge"] == "right_only"]
 
+            # ================= KẾT QUẢ =================
+
             st.markdown("## 📊 KẾT QUẢ")
 
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric("Tổng dòng File A", len(df_a_compare))
             col2.metric("Tổng dòng File B", len(df_b_compare))
+            col3.metric("B không tồn tại trong A", len(b_not_in_a))
 
-            st.metric("B không tồn tại trong A", len(b_not_in_a))
+            if len(b_not_in_a) > 0:
+                st.error("❌ Có dữ liệu File B không tồn tại trong File A.")
+            else:
+                st.success("✅ Tất cả dữ liệu File B tồn tại trong File A.")
+
+            # =================================================
+            # 🔎 HIỂN THỊ TỪNG CẶP CỘT SONG SONG (ĐÃ SORT)
+            # =================================================
 
             st.markdown("---")
-            st.subheader("📄 Data File A")
-            st.dataframe(df_a_compare, use_container_width=True)
+            st.subheader("🔎 So sánh từng cột giữa 2 file (đã sắp xếp)")
 
-            st.subheader("📄 Data File B")
-            st.dataframe(df_b_compare, use_container_width=True)
+            for col in common_cols:
 
-            st.subheader("❗ Chỉ có trong File A")
+                st.markdown(f"### 📌 Cột: {col}")
+
+                df_a_sorted = (
+                    df_a_compare[[col]]
+                    .sort_values(by=col)
+                    .reset_index(drop=True)
+                )
+                df_a_sorted.index = df_a_sorted.index + 1
+
+                df_b_sorted = (
+                    df_b_compare[[col]]
+                    .sort_values(by=col)
+                    .reset_index(drop=True)
+                )
+                df_b_sorted.index = df_b_sorted.index + 1
+                left, right = st.columns(2)
+
+                with left:
+                    st.markdown("**File A (đã sắp xếp)**")
+                    st.dataframe(
+                        df_a_sorted,
+                        use_container_width=True,
+                        height=400
+                    )
+
+                with right:
+                    st.markdown("**File B (đã sắp xếp)**")
+                    st.dataframe(
+                        df_b_sorted,
+                        use_container_width=True,
+                        height=400
+                    )
+
+                st.markdown("---")
+
+            # =================================================
+            # SHOW PHẦN CHÊNH LỆCH
+            # =================================================
+
+            st.subheader("❗ Dữ liệu chỉ có trong File A")
             st.dataframe(a_not_in_b[common_cols], use_container_width=True)
 
-            st.subheader("❗ Chỉ có trong File B")
+            st.subheader("❗ Dữ liệu chỉ có trong File B")
             st.dataframe(b_not_in_a[common_cols], use_container_width=True)
